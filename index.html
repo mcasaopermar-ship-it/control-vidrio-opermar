@@ -86,6 +86,29 @@ function editPos(n){if(!S.cycle)return;if(!S.breakageType){toast('Elegí primero
 async function startCycle(){if(S.cycle)return;try{let r=await insert('cycles',{truck_id:S.truck.id,operator_id:$('operator').value||null,operator_status:'Vacía',controller_status:'Para armar',target_cases:+$('target').value||700,broken_cases:0,notes:$('notes').value||null,created_by:S.user.id,created_by_name:S.user.email});S.cycle=r[0];await event('Ciclo iniciado',`Objetivo ${S.cycle.target_cases} cajones`);await openTruck(S.truck.id);toast('Carga iniciada')}catch(e){fail(e)}}
 async function saveTruck(){try{let code=$('truckCode').value.trim();if(!code)throw Error('Ingresá un ID de volqueta');let r=await update('trucks',{code},q=>q.eq('id',S.truck.id));if(S.cycle){let data={operator_id:$('operator').value||null,operator_status:$('operatorStatus').value,controller_status:$('controllerStatus').value,target_cases:+$('target').value||700,notes:$('notes').value||null};await update('cycles',data,q=>q.eq('id',S.cycle.id));Object.assign(S.cycle,data)}await core();S.truck=S.trucks.find(t=>t.id===S.truck.id);await openTruck(S.truck.id);toast('Datos guardados')}catch(e){fail(e)}}
 async function saveDeclaration(){if(!S.cycle)return;try{let n=+$('broken').value||0,op=$('brokenOperator').value||S.cycle.operator_id||null;let status=n>=+S.cycle.target_cases?'Finalizada':'En proceso';await update('cycles',{broken_cases:n,operator_id:op,operator_status:status},q=>q.eq('id',S.cycle.id));await insert('declarations',{cycle_id:S.cycle.id,operator_id:op,declared_cases:n,declared_by:S.user.id,declared_by_name:S.user.email,notes:$('declNotes').value||null});await event('Rotura declarada',`${n} cajones`);await openTruck(S.truck.id);toast('Declaración guardada')}catch(e){fail(e)}}
+function updateEgress(){
+ const c=S.cycle;
+ if(!c){$('egress').disabled=true;$('egressHelp').textContent='Iniciá un ciclo para registrar un egreso.';return}
+ const reached=Number(c.broken_cases||0)>=Number(c.target_cases||0);
+ const confirmed=$('framesRemoved').checked;
+ $('egress').disabled=!(reached&&confirmed);
+ $('egressHelp').textContent=!reached?`Faltan ${N(Math.max(0,Number(c.target_cases||0)-Number(c.broken_cases||0)))} cajones para alcanzar el objetivo.`:(confirmed?'Objetivo alcanzado y retiro confirmado.':'Objetivo alcanzado: confirmá el retiro de esqueletos vacíos.');
+}
+async function egress(){
+ if(!S.cycle)return;
+ if(Number(S.cycle.broken_cases||0)<Number(S.cycle.target_cases||0)||!$('framesRemoved').checked){updateEgress();return}
+ const supplier=$('supplierRemit').value.trim(),internal=$('internalRemit').value.trim();
+ if(!supplier||!internal){toast('Completá ambos números de remito');return}
+ if(!confirm('¿Confirmás el egreso y cierre del ciclo?'))return;
+ try{
+  const total=S.positions.reduce((n,p)=>n+Number(p.cases_count||0),0);
+  await insert('egresses',{cycle_id:S.cycle.id,truck_id:S.truck.id,truck_code:S.truck.code,supplier_remit:supplier,internal_remit:internal,egressed_by:S.user.id,egressed_by_name:S.user.email,loaded_cases:total,broken_cases:Number(S.cycle.broken_cases||0),operator_id:S.cycle.operator_id,frames_removed:true});
+  await update('cycles',{egressed_at:new Date().toISOString(),controller_status:'Retirada',operator_status:'Finalizada'},q=>q.eq('id',S.cycle.id));
+  await event('Volqueta retirada',`Remito proveedor ${supplier}; remito OPERMAR SA ${internal}`);
+  await home();show('home');toast('Egreso registrado; el historial se conserva');
+ }catch(e){fail(e)}
+}
+
 async function verify(){
  if(!S.cycle)return;
  const active=S.positions.filter(p=>p.product_name&&+p.cases_count>0);
