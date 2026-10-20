@@ -218,6 +218,7 @@ async function kanban(){
    {key:'En proceso',title:'En proceso'},
    {key:'Para desarmar',title:'Para desarmar'},
    {key:'Finalizada',title:'Finalizada'},
+    {key:'Retirada',title:'Retirada'},
   ];
   const items=await Promise.all(S.trucks.map(async t=>{
    const c=latestByTruck[t.id];
