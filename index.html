@@ -112,14 +112,20 @@ async function saveDeclaration(){if(!S.cycle)return;try{if(!S.breakageSelectionM
 function updateEgress(){
  const c=S.cycle;
  if(!c){$('egress').disabled=true;$('egressHelp').textContent='Iniciá un ciclo para registrar un egreso.';return}
+ const loaded=S.positions.filter(p=>p.product_name&&Number(p.cases_count||0)>0);
+ const allLoadedBroken=loaded.length>0&&loaded.every(p=>isPositionBroken(p.position_number));
  const reached=Number(c.broken_cases||0)>=Number(c.target_cases||0);
+ const completed=reached||allLoadedBroken;
  const confirmed=$('framesRemoved').checked;
- $('egress').disabled=!(reached&&confirmed);
- $('egressHelp').textContent=!reached?`Faltan ${N(Math.max(0,Number(c.target_cases||0)-Number(c.broken_cases||0)))} cajones para alcanzar el objetivo.`:(confirmed?'Objetivo alcanzado y retiro confirmado.':'Objetivo alcanzado: confirmá el retiro de esqueletos vacíos.');
+ $('egress').disabled=!(completed&&confirmed);
+ $('egressHelp').textContent=!completed?`Faltan ${N(Math.max(0,Number(c.target_cases||0)-Number(c.broken_cases||0)))} cajones para alcanzar el objetivo y aún hay paletas sin declarar rotas.`:allLoadedBroken&&!reached?'Todas las paletas cargadas figuran como rotas. Se permite el egreso por carga completa real, aunque no se haya alcanzado el objetivo teórico. '+(confirmed?'Retiro confirmado.':'Confirmá el retiro de esqueletos vacíos.'):(confirmed?'Objetivo alcanzado y retiro confirmado.':'Objetivo alcanzado: confirmá el retiro de esqueletos vacíos.');
 }
 async function egress(){
  if(!S.cycle)return;
- if(Number(S.cycle.broken_cases||0)<Number(S.cycle.target_cases||0)||!$('framesRemoved').checked){updateEgress();return}
+ const loaded=S.positions.filter(p=>p.product_name&&Number(p.cases_count||0)>0);
+ const allLoadedBroken=loaded.length>0&&loaded.every(p=>isPositionBroken(p.position_number));
+ const reached=Number(S.cycle.broken_cases||0)>=Number(S.cycle.target_cases||0);
+ if(!(reached||allLoadedBroken)||!$('framesRemoved').checked){updateEgress();return}
  const supplier=$('supplierRemit').value.trim(),internal=$('internalRemit').value.trim();
  if(!supplier||!internal){toast('Completá ambos números de remito');return}
  if(!confirm('¿Confirmás el egreso y cierre del ciclo?'))return;
@@ -284,5 +290,4 @@ async function signedIn(session){S.user=session.user;let r=await sb.from('profil
 try{setTheme(localStorage.getItem('opermar-theme')==='dark')}catch(e){}$('themeBtn').onclick=()=>setTheme(!document.body.classList.contains('dark'));$('modeBtn').onclick=openModePrompt;$('addOperator').onclick=openAddOperator;$('breakageType').onchange=async()=>{if(!S.cycle)return;let type=$('breakageType').value;if(!type){S.breakageType='';return}if(S.positions.some(p=>p.product_name&&prod(p.product_name)?.family!==type)){if(!confirm('Cambiar Rotura no coincide con productos ya cargados. ¿Querés cambiar la línea? Las posiciones anteriores se conservan, pero no estarán disponibles para editar mientras otra línea esté elegida.')){$('breakageType').value=S.breakageType;return}}try{await update('cycles',{breakage_type:type},q=>q.eq('id',S.cycle.id));S.cycle.breakage_type=type;S.breakageType=type;renderBin();toast('Línea de rotura guardada')}catch(e){fail(e)}};$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';let r=await sb.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(r.error){$('loginError').textContent=r.error.message;return}await signedIn(r.data.session)};$('logout').onclick=async()=>{await sb.auth.signOut();S.user=null;S.profile=null;show('login')};$('refresh').onclick=()=>home().catch(fail);$('openKanban').onclick=()=>kanban().catch(fail);$('kanbanRefresh').onclick=()=>kanban().catch(fail);$('kanbanBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('back').onclick=()=>home().then(()=>show('home')).catch(fail);$('bulkLoad').onclick=()=>openBulkLoad();$('startCycle').onclick=()=>startCycle().catch(fail);$('saveTruck').onclick=()=>saveTruck().catch(fail);$('saveDeclaration').onclick=()=>saveDeclaration().catch(fail);$('verify').onclick=()=>verify().catch(fail);$('egress').onclick=()=>egress().catch(fail);$('framesRemoved').onchange=updateEgress;$('dashBtn').onclick=()=>dashboard().catch(fail);$('dashBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('period').onchange=()=>dashboard().catch(fail);['productionOperator','productionFrom','productionTo'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{S.productionPage=1;dashboard().catch(fail)}});$('clearProductionFilters').onclick=()=>{S.productionPage=1;['productionOperator','productionFrom','productionTo'].forEach(id=>{if($(id))$(id).value=''});dashboard().catch(fail)};
 (async()=>{let r=await sb.auth.getSession();if(r.data.session)await signedIn(r.data.session)})();
 </script></body></html>
-
 
