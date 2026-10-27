@@ -83,6 +83,33 @@ body.dark .stat-hint{color:#a5bdd3}
 .wizard-current{background:var(--g)!important;color:#fff!important;border-color:var(--g)!important}.wizard-done{border-color:#268052!important}.cycle-row{cursor:pointer}.cycle-row:hover{background:var(--surface-soft)}.cycle-detail-row td{background:var(--surface-soft)}.cycle-number{font-weight:850;color:var(--g);white-space:nowrap}
 /* Flujo guiado e historial por ciclo */
 .wizard-current{background:var(--g)!important;color:#fff!important;border-color:var(--g)!important}.wizard-done{border-color:var(--g)!important}.cycle-row{cursor:pointer}.cycle-row:hover{background:var(--surface-soft)}.cycle-number{font-weight:800;color:var(--g);white-space:nowrap}.cycle-detail-row>td{padding:8px;background:var(--surface-soft)}.cycle-detail-row table{min-width:760px}
+
+/* Flujo guiado: una sola etapa visible, centrada y sin columnas vacías */
+#detail{--wizard-width:960px}
+#detail #guidedWorkflow{width:min(100%,var(--wizard-width));margin:0 auto 18px!important;position:relative}
+#detail #guidedWorkflow> .line{align-items:center;gap:14px}
+#detail #guidedWorkflow .right{justify-content:flex-end}
+#detail .layout{display:block!important;width:100%;}
+#detail .layout>div{display:contents!important}
+#detail .layout .panel{width:min(100%,var(--wizard-width));box-sizing:border-box;margin:0 auto 16px;}
+#detail .layout .panel.hidden{display:none!important}
+#detail .head{width:min(100%,var(--wizard-width));margin-left:auto;margin-right:auto}
+#detail #detailAlert{width:min(100%,var(--wizard-width));margin:0 auto 12px}
+#detail .layout .panel h2{margin-top:0}
+#detail .layout .panel .bin{max-width:100%;}
+#detail .layout .panel .tablewrap{max-width:100%;overflow-x:auto}
+#detail #workflowHint{max-width:520px}
+#detail [data-wstep]{white-space:nowrap}
+@media(max-width:760px){
+ #detail #guidedWorkflow{padding:12px}
+ #detail #guidedWorkflow>.line{display:flex;flex-direction:column;align-items:stretch}
+ #detail #guidedWorkflow .right{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;width:100%}
+ #detail #guidedWorkflow .right button{font-size:12px;padding:9px 6px}
+ #detail #startGuidedCycle{grid-column:1/-1}
+ #detail .layout .panel{padding:12px;margin-bottom:12px}
+ #detail .layout .panel .stats{gap:6px}
+}
+
 </style></head><body>
 <header id="header" class="hidden"><div class="bar"><img class="logo" src="assets/logo-opermar-sa.png" alt="OPERMAR SA"><div class="brand"><b>CONTROL DE VIDRIO</b><small>Operación y trazabilidad</small></div><div class="right"><span id="userLabel" class="muted"></span><button id="themeBtn" class="btn" type="button" aria-label="Cambiar tema">☾ Oscuro</button><button id="modeBtn" class="btn">Modo Supervisor</button><button id="dashBtn" class="btn hidden">Dashboard</button><button id="logout" class="btn">Salir</button></div></div></header>
 <main>
@@ -122,19 +149,21 @@ function applyGuidedWorkflow(requested){
  const step=Math.max(1,Math.min(4,Number(requested)||workflowStage()));S.workflowStep=step;
  const panels=[...document.querySelectorAll('#detail .layout .panel')];
  panels.forEach(p=>{
-  const title=p.querySelector('h2')?.textContent?.trim()||'';let visible=true;
+  const title=p.querySelector('h2')?.textContent?.trim()||'';
+  // Solo se muestran los formularios necesarios para la etapa actual.
+  let visible=false;
   if(title==='Identificación y asignación')visible=step===1;
   else if(title==='Distribución de la carga')visible=step===2||step===3;
-  else if(title==='Resumen del ciclo')visible=step!==1;
   else if(title==='Declaración de rotura')visible=step===3;
   else if(title==='Egreso de volqueta')visible=step===4;
-  else if(title==='Verificaciones')visible=step===2;
-  else if(title==='Movimientos')visible=step===2||step===4;
+  // Resumen, verificaciones y movimientos siguen disponibles en el historial/dashboard,
+  // pero no ocupan espacio en medio de la tarea guiada.
   p.classList.toggle('hidden',!visible);
  });
  document.querySelectorAll('[data-wstep]').forEach(b=>{const n=Number(b.dataset.wstep);b.classList.toggle('wizard-current',n===step);b.classList.toggle('wizard-done',n<step);b.disabled=(n>1&&!S.cycle)});
- const hints={1:S.cycle?'La identificación ya está guardada. Podés revisarla sin reiniciar el ciclo.':'Confirmá el ID de volqueta y guardá los datos para continuar.',2:S.positions.some(p=>p.product_name)?'La carga ya está guardada. No necesitás volver a armarla.':'Armá la carga por producto o completá las posiciones y guardá.',3:Number(S.cycle?.broken_cases||0)>0?'Continuá declarando las paletas rotas que correspondan.':'La carga queda guardada aunque la rotura todavía no haya comenzado.',4:'Confirmá el retiro de esqueletos y completá ambos remitos para cerrar el ciclo.'};
+ const hints={1:S.cycle?'Revisá o corregí la identificación de esta volqueta.':'Confirmá el ID, asigná los datos necesarios y guardá para continuar.',2:S.positions.some(p=>p.product_name)?'Carga guardada. Revisá la distribución o continuá sin volver a cargarla.':'Elegí la línea y armá la carga. Al guardarla podés volver al centro de operaciones.',3:Number(S.cycle?.broken_cases||0)>0?'Seleccioná en el esquema las paletas rotas y registrá quién realizó la rotura.':'La carga permanece guardada aunque la rotura todavía no haya comenzado.',4:'Completá los remitos y confirmá el retiro de esqueletos para cerrar el ciclo.'};
  $('workflowHint').textContent=hints[step];
+ $('guidedWorkflow').dataset.step=String(step);
 }
 function renderDetail(){let t=S.truck,c=S.cycle;/* Los remitos pertenecen a un único egreso: nunca reutilizar los ingresados en otra volqueta. */$('supplierRemit').value='';$('internalRemit').value='';$('framesRemoved').checked=false;$('detailTitle').textContent=`Volqueta ${t.truck_number} · ${t.code}`;$('detailSub').textContent=c?`Ciclo iniciado ${new Date(c.created_at).toLocaleString('es-UY')}`:'Sin ciclo activo. Iniciá una carga.';$('truckCode').value=t.code;S.breakageType=c?.breakage_type||'';$('breakageType').value=S.breakageType;$('breakageType').disabled=!c;$('operator').innerHTML=opOptions(c?.operator_id);$('brokenOperator').innerHTML=opOptions(c?.operator_id);$('operatorStatus').value=c?.operator_status||'Vacía';$('controllerStatus').value=c?.controller_status||'Para armar';$('target').value=c?.target_cases||700;$('notes').value=c?.notes||'';$('broken').value=0;S.breakageSelectionMode=false;S.selectedBrokenPositions=[];updateBreakSelectionUI();updateBrokenCasesPreview();$('startCycle').disabled=!!c;$('startGuidedCycle').classList.toggle('hidden',!!c);$('verify').disabled=!c;$('saveDeclaration').disabled=!c;let total=S.positions.reduce((a,p)=>a+ +p.cases_count,0);$('loaded').textContent=N(total);$('brokenSum').textContent=N(c?.broken_cases);$('pending').textContent=N(Math.max(0,total-(+c?.broken_cases||0)));$('summary').innerHTML=summaryTable();renderBin();$('verifications').innerHTML=verificationTable();$('events').innerHTML=eventTable();$('detailAlert').innerHTML=c?'':'<div class="notice">Iniciá una nueva carga para editar posiciones y registrar producción.</div>';updateEgress();applyGuidedWorkflow(workflowStage());}
 function summaryTable(){let g={};S.positions.forEach(p=>{if(p.product_name)g[p.product_name]=(g[p.product_name]||0)+ +p.cases_count});return Object.keys(g).length?`<div class="tablewrap"><table><tr><th>Producto</th><th class="num">Cajones</th><th class="num">Botellas estimadas</th></tr>${Object.entries(g).map(([n,v])=>`<tr><td>${esc(n)}</td><td class="num">${N(v)}</td><td class="num">${N(v*(prod(n)?.bottles_per_case||0))}</td></tr>`).join('')}</table></div>`:'<p class="sub">Todavía no hay posiciones cargadas.</p>'}
