@@ -133,6 +133,16 @@ body.dark .pos.cal-patricia-ln:not(.is-broken):not(.break-selected){
 .pos.cal-patricia-ln:not(.is-broken):not(.break-selected) span:last-child{
   color:inherit!important;
 }
+
+.egress-main-table{min-width:900px}
+.egress-cycle-details{min-width:150px}
+.egress-cycle-details>summary{cursor:pointer;font-weight:800;color:var(--g);padding:5px 0;white-space:nowrap}
+.egress-detail-wrap{margin:10px 0 4px;max-width:min(780px,80vw);overflow:auto;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+.egress-detail-table{min-width:650px;font-size:12px}
+.egress-detail-table th{white-space:nowrap}
+.egress-detail-table tfoot th{background:var(--surface-soft);color:var(--text);font-size:12px}
+.egress-detail-empty{padding:10px;color:var(--muted);font-size:12px}
+
 </style></head><body>
 <header id="header" class="hidden"><div class="bar"><img class="logo" src="assets/logo-opermar-sa.png" alt="OPERMAR SA"><div class="brand"><b>CONTROL DE VIDRIO</b><small>Operación y trazabilidad</small></div><div class="right"><span id="userLabel" class="muted"></span><button id="themeBtn" class="btn" type="button" aria-label="Cambiar tema">☾ Oscuro</button><button id="modeBtn" class="btn">Modo Supervisor</button><button id="dashBtn" class="btn hidden">Dashboard</button><button id="logout" class="btn">Salir</button></div></div></header>
 <main>
@@ -532,6 +542,33 @@ function makeDashboardSectionsCollapsible(){
   details.append(summary,content);panel.replaceWith(details);
  });
 }
+
+function egressDeclarationDetail(e,allDecls,positions,cycle){
+ const ds=allDecls.filter(d=>d.cycle_id===e.cycle_id).sort((a,b)=>new Date(a.declared_at||a.created_at||0)-new Date(b.declared_at||b.created_at||0));
+ if(!ds.length)return '<div class="egress-detail-empty">No hay declaraciones de rotura registradas para este ciclo.</div>';
+ let totalPallets=0,totalCases=0;
+ const rows=[];
+ for(const d of ds){
+  const note=String(d.notes||''),pm=note.match(/Posiciones rotas:\s*([0-9, ]+)/i),palletMatch=note.match(/Paletas declaradas como rotas:\s*(\d+(?:[.,]\d+)?)/i);
+  const pos=pm?pm[1].split(',').map(x=>Number(x.trim())).filter(Boolean):[];
+  const byProduct={};
+  pos.forEach(n=>{const p=positions.find(x=>Number(x.position_number)===n);if(!p?.product_name)return;const g=byProduct[p.product_name]??={pallets:0,cases:0};g.pallets+=Number(p.pallets_count||1);g.cases+=Number(p.cases_count||0)});
+  if(!Object.keys(byProduct).length&&palletMatch){
+   const names=[...new Set(positions.map(p=>p.product_name).filter(Boolean))];
+   const name=names.length===1?names[0]:'Detalle histórico no disponible';
+   byProduct[name]={pallets:Number(palletMatch[1].replace(',','.')),cases:Number(d.declared_cases||0)};
+  }
+  if(!Object.keys(byProduct).length)byProduct['Detalle histórico no disponible']={pallets:Number(palletMatch?.[1]?.replace(',','.')||0),cases:Number(d.declared_cases||0)};
+  const date=d.declared_at||d.created_at||null;
+  const operator=S.ops.find(o=>o.id===d.operator_id)?.name||d.declared_by_name||'Sin asignar';
+  for(const [product,v] of Object.entries(byProduct)){
+   totalPallets+=v.pallets;totalCases+=v.cases;
+   rows.push(`<tr><td>${date?new Date(date).toLocaleString('es-UY'):'—'}</td><td>${esc(operator)}</td><td>${esc(product)}</td><td class="num">${N(v.pallets)}</td><td class="num">${N(v.cases)}</td></tr>`);
+  }
+ }
+ return `<div class="egress-detail-wrap"><table class="egress-detail-table"><thead><tr><th>Fecha</th><th>Operario</th><th>Producto / Calibre</th><th class="num">Paletas</th><th class="num">Cajones</th></tr></thead><tbody>${rows.join('')}</tbody><tfoot><tr><th colspan="3">TOTAL DEL CICLO</th><th class="num">${N(totalPallets)}</th><th class="num">${N(totalCases)}</th></tr></tfoot></table></div>`;
+}
+
 async function dashboard(){try{
  await core();
  $('saveTruckConfig').onclick=()=>saveTruckConfig().catch(fail);$('toggleProductManager').onclick=()=>{const box=$('productManager');const opening=box.classList.contains('hidden');box.classList.toggle('hidden',!opening);if(opening)loadProductManager().catch(fail)};$('newProductForm').onsubmit=createProduct;$('cancelNewProduct').onclick=()=>{$('productManager').classList.add('hidden');$('newProductForm').reset()};$('toggleProductConfig').onclick=()=>{const panel=$('configPanel');const opening=panel.classList.contains('hidden');panel.classList.toggle('hidden',!opening);$('toggleProductConfig').textContent=opening?'✕ Cerrar configuración':'⚙️ Configurar productos';if(opening)loadTruckConfig().catch(fail)};
@@ -543,7 +580,7 @@ async function dashboard(){try{
  $('dProducts').innerHTML=Object.keys(groups).length?`<table><tr><th>Producto/calibre</th><th class="num">Cajones cargados</th></tr>${Object.entries(groups).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<tr><td>${esc(k)}</td><td class="num">${N(v)}</td></tr>`).join('')}</table>`:'<p class="sub">Sin egresos para el período.</p>';
  let dr=await sb.from('declarations').select('*');if(dr.error)throw dr.error;
  const egressPositions=ids.length?await get('positions',q=>q.in('cycle_id',ids)):[];const egressPosByCycle={};egressPositions.forEach(p=>(egressPosByCycle[p.cycle_id]??=[]).push(p));
- $('dEgress').innerHTML=outs.length?`<table><tr><th>Fecha</th><th>Volqueta</th><th>Remito proveedor</th><th>Remito OPERMAR SA</th><th>Producto / calibre</th><th>Paletas rotas</th><th>Cajones rotos</th></tr>${outs.map(e=>{const pp=egressPosByCycle[e.cycle_id]||[];const brokenDecls=(dr.data||[]).filter(d=>d.cycle_id===e.cycle_id);const byProduct={};brokenDecls.forEach(d=>{const note=String(d.notes||'');const pm=note.match(/Posiciones rotas:\s*([0-9, ]+)/i);const palletMatch=note.match(/Paletas declaradas como rotas:\s*(\d+(?:[.,]\d+)?)/i);const pos=pm?pm[1].split(',').map(x=>Number(x.trim())).filter(Boolean):[];pos.forEach(n=>{const p=pp.find(x=>Number(x.position_number)===n);if(!p?.product_name)return;byProduct[p.product_name]??={pallets:0,cases:0};byProduct[p.product_name].pallets+=1;byProduct[p.product_name].cases+=Number(p.cases_count||0)});if(!pos.length&&palletMatch){const productNames=[...new Set(pp.map(p=>p.product_name).filter(Boolean))];if(productNames.length===1){const k=productNames[0];byProduct[k]??={pallets:0,cases:0};byProduct[k].pallets+=Number(palletMatch[1].replace(',','.'));byProduct[k].cases+=Number(d.declared_cases||0)}}});const entries=Object.entries(byProduct);return entries.length?entries.map(([product,v],i)=>`<tr><td>${i===0?new Date(e.egressed_at).toLocaleString('es-UY'):''}</td><td>${i===0?esc(e.truck_code):''}</td><td>${i===0?esc(e.supplier_remit):''}</td><td>${i===0?esc(e.internal_remit):''}</td><td>${esc(product)}</td><td class="num">${N(v.pallets)}</td><td class="num">${N(v.cases)}</td></tr>`).join(''):`<tr><td>${new Date(e.egressed_at).toLocaleString('es-UY')}</td><td>${esc(e.truck_code)}</td><td>${esc(e.supplier_remit)}</td><td>${esc(e.internal_remit)}</td><td>Detalle histórico no disponible</td><td>—</td><td>${N(e.broken_cases)}</td></tr>`}).join('')}</table>`:'<p class="sub">Sin egresos para el período.</p>';
+ $('dEgress').innerHTML=outs.length?`<table class="egress-main-table"><thead><tr><th>Fecha de egreso</th><th>Volqueta</th><th>Posición de volqueta</th><th>Remito proveedor</th><th>Remito OPERMAR SA</th><th>Familia rotura</th></tr></thead><tbody>${outs.map(e=>{const cycle=xDiffCycleMap987[e.cycle_id]||{};const truck=xDiffTruckMap987[e.truck_id]||xDiffTruckMap987[cycle.truck_id]||{};const pp=egressPosByCycle[e.cycle_id]||[];const detail=egressDeclarationDetail(e,dr.data||[],pp,cycle);return `<tr><td>${e.egressed_at?new Date(e.egressed_at).toLocaleString('es-UY'):'—'}</td><td><details class="egress-cycle-details"><summary>${esc(e.truck_code||truck.code||'—')}</summary>${detail}</details></td><td>${truck.truck_number?`Volqueta ${esc(truck.truck_number)}`:'—'}</td><td>${esc(e.supplier_remit||'—')}</td><td>${esc(e.internal_remit||'—')}</td><td>${esc(cycle.breakage_type||'—')}</td></tr>`}).join('')}</tbody></table>`:'<p class="sub">Sin egresos para el período.</p>';
  $('dDifferences').innerHTML=dif.length?`<table><tr><th>Fecha de verificación</th><th>Volqueta</th><th>Controlador que cargó</th><th>Fecha de carga</th><th>Controlador que verificó</th><th>Cajones equivalentes</th><th>Posiciones con diferencia</th><th>Observación</th></tr>${dif.map(v=>{const c=xDiffCycleMap987[v.cycle_id]||{};const t=xDiffTruckMap987[c.truck_id]||{};return `<tr><td>${v.verified_at?new Date(v.verified_at).toLocaleString('es-UY'):'—'}</td><td>${esc(t.code||c.truck_code||'—')} ${t.truck_number?`(Pos. ${t.truck_number})`:''}</td><td>${esc(c.created_by_name||'No registrado')}</td><td>${c.created_at?new Date(c.created_at).toLocaleString('es-UY'):'—'}</td><td>${esc(v.verifier_name||'No registrado')}</td><td>${N(v.remaining_cases)}</td><td class="diff">${N(v.difference_cases)}</td><td>${esc(v.notes||'—')}</td></tr>`}).join('')}</table>`:'<p class="sub">Sin diferencias registradas.</p>';
  // Las declaraciones se relacionan con el ciclo, que identifica la volqueta. Las posiciones
  // seleccionadas siguen el mismo orden usado por la vista de rotura de la aplicación.
@@ -607,5 +644,4 @@ async function signedIn(session){S.user=session.user;let r=await sb.from('profil
 try{setTheme(localStorage.getItem('opermar-theme')==='dark')}catch(e){}$('themeBtn').onclick=()=>setTheme(!document.body.classList.contains('dark'));$('modeBtn').onclick=openModePrompt;$('manageOperators').onclick=()=>openManageOperators().catch(fail);$('breakageType').onchange=async()=>{if(!S.cycle)return;let type=$('breakageType').value;if(!type){S.breakageType='';return}if(S.positions.some(p=>p.product_name&&prod(p.product_name)?.family!==type)){if(!await askConfirm('Cambiar línea de rotura','La línea seleccionada no coincide con algunos productos ya cargados. Las posiciones anteriores se conservan, pero no estarán disponibles para editar mientras otra línea esté elegida. ¿Querés cambiar la línea?','Cambiar línea')){$('breakageType').value=S.breakageType;return}}try{await update('cycles',{breakage_type:type},q=>q.eq('id',S.cycle.id));S.cycle.breakage_type=type;S.breakageType=type;renderBin();toast('Línea de rotura guardada')}catch(e){fail(e)}};$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';let r=await sb.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(r.error){$('loginError').textContent=r.error.message;return}await signedIn(r.data.session)};$('logout').onclick=async()=>{await sb.auth.signOut();S.user=null;S.profile=null;show('login')};$('refresh').onclick=()=>home().catch(fail);$('openKanban').onclick=()=>kanban().catch(fail);$('kanbanRefresh').onclick=()=>kanban().catch(fail);$('kanbanBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('back').onclick=()=>home().then(()=>show('home')).catch(fail);$('startGuidedCycle').onclick=async()=>{try{if(S.cycle){applyGuidedWorkflow(2);return}await saveTruck();if(!S.cycle)await startCycle();applyGuidedWorkflow(2)}catch(e){fail(e)}};document.querySelectorAll('[data-wstep]').forEach(b=>b.onclick=()=>{const n=Number(b.dataset.wstep);if(n===2&&!S.cycle){toast('Primero confirmá la identificación e iniciá la carga.');return}if(n===3&&!S.positions.some(p=>p.product_name)){toast('Primero guardá la carga.');return}if(n===4){const loaded=S.positions.filter(p=>p.product_name);const allBroken=loaded.length>0&&loaded.every(p=>isPositionBroken(p.position_number));if(!allBroken&&Number(S.cycle?.broken_cases||0)<Number(S.cycle?.target_cases||0)){toast('El egreso se habilita al completar la rotura de la carga.');return}}applyGuidedWorkflow(n)});$('bulkLoad').onclick=()=>openBulkLoad(false);$('prepareNextLoad').onclick=()=>prepareNextLoad().catch(fail);$('startCycle').onclick=()=>startCycle().catch(fail);$('saveTruck').onclick=()=>saveTruck().catch(fail);$('saveDeclaration').onclick=()=>saveDeclaration().catch(fail);$('verify').onclick=()=>verify().catch(fail);$('egress').onclick=()=>egress().catch(fail);$('framesRemoved').onchange=updateEgress;$('dashBtn').onclick=()=>dashboard().catch(fail);$('dashBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('period').onchange=()=>dashboard().catch(fail);['productionOperator','productionFrom','productionTo'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{S.productionPage=1;dashboard().catch(fail)}});$('clearProductionFilters').onclick=()=>{S.productionPage=1;['productionOperator','productionFrom','productionTo'].forEach(id=>{if($(id))$(id).value=''});dashboard().catch(fail)};
 (async()=>{let r=await sb.auth.getSession();if(r.data.session)await signedIn(r.data.session)})();
 </script></body></html>
-
 
