@@ -595,15 +595,28 @@ function exportMultiSheetWorkbook(sheets,fileName){
 function exportEgressRows(egressRows,allDecls,positionsByCycle,cycleMap,truckMap,processMap){
  const out=[];
  for(const e of egressRows){
-  const c=cycleMap[e.cycle_id]||{},t=truckMap[e.truck_id]||truckMap[c.truck_id]||{},pp=positionsByCycle[e.cycle_id]||[],ds=allDecls.filter(d=>d.cycle_id===e.cycle_id).sort((a,b)=>new Date(a.declared_at||a.created_at||0)-new Date(b.declared_at||b.created_at||0));
+  const c=cycleMap[e.cycle_id]||{},t=truckMap[e.truck_id]||truckMap[c.truck_id]||{},pp=positionsByCycle[e.cycle_id]||[];
+  const ds=allDecls.filter(d=>d.cycle_id===e.cycle_id).sort((a,b)=>new Date(a.declared_at||a.created_at||0)-new Date(b.declared_at||b.created_at||0));
   const common={'Fecha de egreso':e.egressed_at?new Date(e.egressed_at).toLocaleString('es-UY'):'','ID volqueta':e.truck_code||t.code||'','Posición de volqueta':t.truck_number||'','Remito proveedor':e.supplier_remit||'','Remito OPERMAR SA':e.internal_remit||'','Familia de rotura':c.breakage_type||'','Estado de planilla':processMap[e.id]?'PROCESADA':'PENDIENTE','Fecha de procesamiento':processMap[e.id]?.processed_at?new Date(processMap[e.id].processed_at).toLocaleString('es-UY'):'','Procesada por':processMap[e.id]?.processed_by_name||'','Fecha de carga':c.created_at?new Date(c.created_at).toLocaleString('es-UY'):'','Operario asignado':S.ops.find(o=>o.id===c.operator_id)?.name||'','Cajones cargados':Number(e.loaded_cases||0),'Cajones declarados rotos':Number(e.broken_cases||0)};
-  if(!ds.length){out.push({...common,'Fecha de declaración':'','Operario que declaró':'','Producto / calibre':'','Posiciones rotas':'','Paletas declaradas':'','Cajones declarados':'','Observaciones':''});continue;}
-  for(const d of ds){
-   const note=String(d.notes||''),pm=note.match(/Posiciones rotas:\s*([0-9, ]+)/i),palletMatch=note.match(/Paletas declaradas como rotas:\s*(\d+(?:[.,]\d+)?)/i),pos=pm?pm[1].split(',').map(x=>Number(x.trim())).filter(Boolean):[],byProduct={};
-   pos.forEach(n=>{const p=pp.find(x=>Number(x.position_number)===n);if(!p?.product_name)return;const g=byProduct[p.product_name]??={pallets:0,cases:0,positions:[]};g.pallets+=Number(p.pallets_count||1);g.cases+=Number(p.cases_count||0);g.positions.push(n)});
-   if(!Object.keys(byProduct).length){const names=[...new Set(pp.map(p=>p.product_name).filter(Boolean))],name=names.length===1?names[0]:'Detalle histórico no disponible';byProduct[name]={pallets:Number(palletMatch?.[1]?.replace(',','.')||0),cases:Number(d.declared_cases||0),positions:pos};}
-   for(const [product,v] of Object.entries(byProduct))out.push({...common,'Fecha de declaración':d.declared_at||d.created_at?new Date(d.declared_at||d.created_at).toLocaleString('es-UY'):'','Operario que declaró':S.ops.find(o=>o.id===d.operator_id)?.name||d.declared_by_name||'','Producto / calibre':product,'Posiciones rotas':v.positions.join(', '),'Paletas declaradas':v.pallets,'Cajones declarados':v.cases,'Observaciones':note});
-  }
+  if(!ds.length){out.push({...common,'N.º declaración':'','Fecha de declaración':'','Operario que declaró':'','Producto / calibre':'','Posiciones':'','Paletas':'','Cajones':'','Observaciones':''});continue;}
+  ds.forEach((d,di)=>{
+   const note=String(d.notes||''),pm=note.match(/Posiciones rotas:\s*([0-9, ]+)/i),palletMatch=note.match(/Paletas declaradas como rotas:\s*(\d+(?:[.,]\d+)?)/i);
+   const pos=pm?pm[1].split(',').map(x=>Number(x.trim())).filter(Boolean):[],byProduct={};
+   pos.forEach(n=>{
+    const p=pp.find(x=>Number(x.position_number)===n);if(!p?.product_name)return;
+    const g=byProduct[p.product_name]??={pallets:0,cases:0,positions:[]};
+    g.pallets+=Number(p.pallets_count||1);g.cases+=Number(p.cases_count||0);g.positions.push(n);
+   });
+   if(!Object.keys(byProduct).length){
+    const names=[...new Set(pp.map(p=>p.product_name).filter(Boolean))],name=names.length===1?names[0]:'Detalle histórico no disponible';
+    byProduct[name]={pallets:Number(palletMatch?.[1]?.replace(',','.')||0),cases:Number(d.declared_cases||0),positions:pos};
+   }
+   const date=d.declared_at||d.created_at||null,operator=S.ops.find(o=>o.id===d.operator_id)?.name||d.declared_by_name||'Sin asignar';
+   // Igual que el desplegable: una fila por producto/calibre dentro de cada declaración.
+   for(const [product,v] of Object.entries(byProduct)){
+    out.push({...common,'N.º declaración':di+1,'Fecha de declaración':date?new Date(date).toLocaleString('es-UY'):'','Operario que declaró':operator,'Producto / calibre':product,'Posiciones':v.positions.join(', '),'Paletas':v.pallets,'Cajones':v.cases,'Observaciones':note});
+   }
+  });
  }
  return out;
 }
@@ -732,6 +745,7 @@ async function signedIn(session){S.user=session.user;let r=await sb.from('profil
 try{setTheme(localStorage.getItem('opermar-theme')==='dark')}catch(e){}$('themeBtn').onclick=()=>setTheme(!document.body.classList.contains('dark'));$('modeBtn').onclick=openModePrompt;$('manageOperators').onclick=()=>openManageOperators().catch(fail);$('breakageType').onchange=async()=>{if(!S.cycle)return;let type=$('breakageType').value;if(!type){S.breakageType='';return}if(S.positions.some(p=>p.product_name&&prod(p.product_name)?.family!==type)){if(!await askConfirm('Cambiar línea de rotura','La línea seleccionada no coincide con algunos productos ya cargados. Las posiciones anteriores se conservan, pero no estarán disponibles para editar mientras otra línea esté elegida. ¿Querés cambiar la línea?','Cambiar línea')){$('breakageType').value=S.breakageType;return}}try{await update('cycles',{breakage_type:type},q=>q.eq('id',S.cycle.id));S.cycle.breakage_type=type;S.breakageType=type;renderBin();toast('Línea de rotura guardada')}catch(e){fail(e)}};$('loginForm').onsubmit=async e=>{e.preventDefault();$('loginError').textContent='';let r=await sb.auth.signInWithPassword({email:$('email').value.trim(),password:$('password').value});if(r.error){$('loginError').textContent=r.error.message;return}await signedIn(r.data.session)};$('logout').onclick=async()=>{await sb.auth.signOut();S.user=null;S.profile=null;show('login')};$('refresh').onclick=()=>home().catch(fail);$('openKanban').onclick=()=>kanban().catch(fail);$('kanbanRefresh').onclick=()=>kanban().catch(fail);$('kanbanBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('back').onclick=()=>home().then(()=>show('home')).catch(fail);$('startGuidedCycle').onclick=async()=>{try{if(S.cycle){applyGuidedWorkflow(2);return}await saveTruck();if(!S.cycle)await startCycle();applyGuidedWorkflow(2)}catch(e){fail(e)}};document.querySelectorAll('[data-wstep]').forEach(b=>b.onclick=()=>{const n=Number(b.dataset.wstep);if(n===2&&!S.cycle){toast('Primero confirmá la identificación e iniciá la carga.');return}if(n===3&&!S.positions.some(p=>p.product_name)){toast('Primero guardá la carga.');return}if(n===4){const loaded=S.positions.filter(p=>p.product_name);const allBroken=loaded.length>0&&loaded.every(p=>isPositionBroken(p.position_number));if(!allBroken&&Number(S.cycle?.broken_cases||0)<Number(S.cycle?.target_cases||0)){toast('El egreso se habilita al completar la rotura de la carga.');return}}applyGuidedWorkflow(n)});$('bulkLoad').onclick=()=>openBulkLoad(false);$('prepareNextLoad').onclick=()=>prepareNextLoad().catch(fail);$('startCycle').onclick=()=>startCycle().catch(fail);$('saveTruck').onclick=()=>saveTruck().catch(fail);$('saveDeclaration').onclick=()=>saveDeclaration().catch(fail);$('verify').onclick=()=>verify().catch(fail);$('egress').onclick=()=>egress().catch(fail);$('framesRemoved').onchange=updateEgress;$('dashBtn').onclick=()=>dashboard().catch(fail);$('dashBack').onclick=()=>home().then(()=>show('home')).catch(fail);$('period').onchange=()=>dashboard().catch(fail);['productionOperator','productionFrom','productionTo'].forEach(id=>{const el=$(id);if(el)el.onchange=()=>{S.productionPage=1;dashboard().catch(fail)}});$('clearProductionFilters').onclick=()=>{S.productionPage=1;['productionOperator','productionFrom','productionTo'].forEach(id=>{if($(id))$(id).value=''});dashboard().catch(fail)};
 (async()=>{let r=await sb.auth.getSession();if(r.data.session)await signedIn(r.data.session)})();
 </script></body></html>
+
 
 
 
